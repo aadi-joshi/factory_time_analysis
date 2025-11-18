@@ -1,0 +1,24 @@
+# Movement project ignores (scoped to this folder only)
+
+# Backend
+backend/.venv/
+backend/__pycache__/
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.coverage*
+backend/.env
+# Data dirs (including nested path safety)
+backend/data/
+backend/**/data/
+
+# Model weights
+backend/*.pt
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.env*
+
+# Project media/artifacts
+video.mp4
