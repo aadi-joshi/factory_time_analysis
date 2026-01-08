@@ -11,11 +11,16 @@ from pathlib import Path
 import uuid
 import json
 
-from app.db import init_db, get_db
+from app.db import init_db, get_db, get_postgres_db
 from app.db.models import Video, Track, Zone, WorkerZoneMapping, IDMerge, VANVAMetric
+from app.db.models import VideoBackup, VANVAMetricBackup  # PostgreSQL backup models
 from app.models.schemas import *
-from app.core.ml_pipeline import DetectionService, VideoProcessingService
-from app.core.geometry import ZoneGeometry, VANVACalculator
+from app.ml_pipelines.zone_worker_tracker import (
+    DetectionService,
+    VideoProcessingService,
+    ZoneGeometry,
+    VANVACalculator
+)
 
 # Initialize FastAPI app
 app = FastAPI(title="VA/NVA Worker Analysis System", version="1.0.0")
@@ -66,7 +71,8 @@ def delete_video(video_id: str, db: Session = Depends(get_db)):
 @app.post("/api/videos/upload", response_model=VideoUploadResponse)
 async def upload_video(
     file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    postgres_db: Session = Depends(get_postgres_db)
 ):
     """Upload a video file"""
     try:
@@ -94,7 +100,7 @@ async def upload_video(
         first_frame_path = FRAMES_DIR / f"{video_id}_first.jpg"
         video_processor.extract_first_frame(str(file_path), str(first_frame_path))
         
-        # Save to database
+        # Save to SQLite database (primary storage)
         db_video = Video(
             id=video_id,
             filename=file.filename,
@@ -109,6 +115,23 @@ async def upload_video(
         db.add(db_video)
         db.commit()
         db.refresh(db_video)
+        
+        # Also save to PostgreSQL (permanent backup)
+        postgres_video = VideoBackup(
+            id=video_id,
+            filename=file.filename,
+            fps=fps,
+            duration_sec=duration_sec,
+            width=width,
+            height=height,
+            total_frames=total_frames,
+            first_frame_path=str(first_frame_path),
+            status="uploaded"
+        )
+        postgres_db.add(postgres_video)
+        postgres_db.commit()
+        
+        print(f"✅ Saved video {video_id} to SQLite and PostgreSQL backup")
         
         return VideoUploadResponse(
             id=db_video.id,
@@ -658,7 +681,11 @@ def get_metrics(video_id: str, db: Session = Depends(get_db)):
 
 
 @app.post("/api/videos/{video_id}/compute-metrics")
-def compute_metrics(video_id: str, db: Session = Depends(get_db)):
+def compute_metrics(
+    video_id: str,
+    db: Session = Depends(get_db),
+    postgres_db: Session = Depends(get_postgres_db)
+):
     """Compute VA/NVA metrics based on current configuration"""
     try:
         # Get video
@@ -758,12 +785,13 @@ def compute_metrics(video_id: str, db: Session = Depends(get_db)):
         
         # Clear previous metrics for this video to avoid duplicates
         db.query(VANVAMetric).filter(VANVAMetric.video_id == video_id).delete()
+        postgres_db.query(VANVAMetricBackup).filter(VANVAMetricBackup.video_id == video_id).delete()
 
-        # Store metrics in database
+        # Store metrics in SQLite (primary storage)
         for worker_id, metric in metrics.items():
             db_metric = VANVAMetric(
                 video_id=video_id,
-            worker_id=str(worker_id),
+                worker_id=str(worker_id),
                 va_frames=metric["va_frames"],
                 nva_frames=metric["nva_frames"],
                 va_seconds=metric["va_seconds"],
@@ -771,8 +799,23 @@ def compute_metrics(video_id: str, db: Session = Depends(get_db)):
                 va_percentage=metric["va_percentage"]
             )
             db.add(db_metric)
+            
+            # Also save to PostgreSQL (permanent backup)
+            postgres_metric = VANVAMetricBackup(
+                video_id=video_id,
+                worker_id=str(worker_id),
+                va_frames=metric["va_frames"],
+                nva_frames=metric["nva_frames"],
+                va_seconds=metric["va_seconds"],
+                nva_seconds=metric["nva_seconds"],
+                va_percentage=metric["va_percentage"]
+            )
+            postgres_db.add(postgres_metric)
         
         db.commit()
+        postgres_db.commit()
+        
+        print(f"✅ Saved {len(metrics)} metrics to SQLite and PostgreSQL backup")
         
         return {
             "video_id": video_id,
