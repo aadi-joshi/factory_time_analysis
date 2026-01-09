@@ -1,94 +1,13 @@
 """
-Detection and Tracking services
+Video Processing Service
+Orchestrates detection and tracking pipeline for video analysis
 """
-import os
 import cv2
-import numpy as np
-from ultralytics import YOLO
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional, Set
-from app.core.sort import SORT
 
-# Disable PyTorch weights_only for compatibility with older YOLO models
-os.environ['TORCH_WEIGHTS_ONLY'] = 'False'
-
-
-class DetectionService:
-    """YOLOv8n detection service"""
-    
-    def __init__(self, model_path: str = "yolov8n.pt", device: str = "cpu"):
-        """
-        Initialize YOLOv8n detector
-        model_path: path to model weights (auto-downloads if needed)
-        device: 'cpu' or 'cuda'
-        """
-        self.model = YOLO(model_path)
-        self.device = device
-        self.model.to(device)
-    
-    def detect_persons(self, frame: np.ndarray, confidence_threshold: float = 0.5) -> List[Dict]:
-        """
-        Detect persons in frame
-        Returns: list of dicts with keys: bbox, confidence
-        """
-        results = self.model(frame, verbose=False, device=self.device, imgsz=640)
-        
-        detections = []
-        for result in results:
-            for box in result.boxes:
-                cls = int(box.cls)
-                if cls == 0:  # class 0 = person
-                    conf = float(box.conf)
-                    if conf >= confidence_threshold:
-                        bbox = box.xyxy[0].cpu().numpy().astype(np.float32)
-                        detections.append({
-                            "bbox": [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])],
-                            "confidence": conf
-                        })
-        
-        return detections
-
-
-class TrackingService:
-    """Multi-object tracking service using SORT"""
-    
-    def __init__(self, max_age: int = 30, min_hits: int = 3):
-        """Initialize SORT tracker"""
-        self.tracker = SORT(max_age=max_age, min_hits=min_hits)
-    
-    def update(self, detections: List[Dict]) -> List[Dict]:
-        """
-        Update tracker with detections
-        detections: list of {bbox: [x1, y1, x2, y2], confidence: float}
-        Returns: list of {bbox: [x1, y1, x2, y2], track_id: int, centroid: [x, y], confidence: float}
-        """
-        # Convert to format for SORT: [[x1, y1, x2, y2, conf], ...]
-        if len(detections) > 0:
-            dets = np.array([
-                [d["bbox"][0], d["bbox"][1], d["bbox"][2], d["bbox"][3], d["confidence"]]
-                for d in detections
-            ])
-        else:
-            dets = np.empty((0, 5))
-        
-        # Update SORT
-        tracks = self.tracker.update(dets)
-        
-        # Format output
-        result = []
-        for track in tracks:
-            x1, y1, x2, y2, track_id = track
-            centroid_x = (x1 + x2) / 2.0
-            centroid_y = (y1 + y2) / 2.0
-            
-            result.append({
-                "bbox": [float(x1), float(y1), float(x2), float(y2)],
-                "track_id": int(track_id),
-                "centroid": [float(centroid_x), float(centroid_y)],
-                "confidence": 0.95  # SORT doesn't output confidence, so use high default
-            })
-        
-        return result
+from .detection import DetectionService
+from .tracking import TrackingService
 
 
 class VideoProcessingService:

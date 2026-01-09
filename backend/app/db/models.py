@@ -1,5 +1,7 @@
 """
 Database models for VA/NVA tracking system
+SQLite: All tables (primary storage)
+PostgreSQL: Videos + VANVAMetric only (permanent backup)
 """
 from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.ext.declarative import declarative_base
@@ -7,8 +9,14 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
 
+# SQLite Base (all tables - primary storage)
 Base = declarative_base()
 
+# PostgreSQL Base (backup storage only)
+PostgresBase = declarative_base()
+
+
+# ==================== SQLite Models (Primary Storage - ALL TABLES) ====================
 
 class Video(Base):
     __tablename__ = "videos"
@@ -103,3 +111,40 @@ class VANVAMetric(Base):
     computed_at = Column(DateTime, default=datetime.utcnow)
     
     video = relationship("Video", back_populates="metrics")
+
+
+# ==================== PostgreSQL Models (Permanent Backup Storage) ====================
+
+class VideoBackup(PostgresBase):
+    """Video metadata backup in PostgreSQL"""
+    __tablename__ = "videos"
+    
+    id = Column(String, primary_key=True)
+    filename = Column(String, nullable=False)
+    fps = Column(Float, nullable=False)
+    duration_sec = Column(Float, nullable=False)
+    width = Column(Integer, nullable=False)
+    height = Column(Integer, nullable=False)
+    total_frames = Column(Integer, nullable=False)
+    first_frame_path = Column(String, nullable=True)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    status = Column(String, default="uploaded")
+    
+    metrics = relationship("VANVAMetricBackup", back_populates="video", cascade="all, delete-orphan")
+
+
+class VANVAMetricBackup(PostgresBase):
+    """VA/NVA metrics backup in PostgreSQL"""
+    __tablename__ = "vava_metrics"
+    
+    id = Column(Integer, primary_key=True)
+    video_id = Column(String, ForeignKey("videos.id"), nullable=False)
+    worker_id = Column(String, nullable=False)
+    va_frames = Column(Integer, default=0)
+    nva_frames = Column(Integer, default=0)
+    va_seconds = Column(Float, default=0.0)
+    nva_seconds = Column(Float, default=0.0)
+    va_percentage = Column(Float, default=0.0)
+    computed_at = Column(DateTime, default=datetime.utcnow)
+    
+    video = relationship("VideoBackup", back_populates="metrics")
