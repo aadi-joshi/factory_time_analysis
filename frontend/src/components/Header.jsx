@@ -12,6 +12,7 @@ function Header() {
                 <nav className="header-nav">
                     <Link to="/" className="nav-link">Dashboard</Link>
                     <Link to="/upload" className="nav-link">Upload Video</Link>
+                    <Link to="/clipper" className="nav-link">Video Clipper</Link>
                     {/* Worker review and analytics are typically accessed via links from the Dashboard */}
                 </nav>
             </div>

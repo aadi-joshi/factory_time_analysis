@@ -69,3 +69,5 @@ backend/tracking.db
 storage/videos/
 storage/frames/
 storage/portraits/
+storage/dataset/
+storage/temp/

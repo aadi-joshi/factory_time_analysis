@@ -43,14 +43,26 @@ STORAGE_DIR = BASE_DIR / "storage"
 VIDEOS_DIR = STORAGE_DIR / "videos"
 FRAMES_DIR = STORAGE_DIR / "frames"
 PORTRAITS_DIR = STORAGE_DIR / "portraits"
+DATASET_DIR = STORAGE_DIR / "dataset"
 
 VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
 FRAMES_DIR.mkdir(parents=True, exist_ok=True)
 PORTRAITS_DIR.mkdir(parents=True, exist_ok=True)
+DATASET_DIR.mkdir(parents=True, exist_ok=True)
 
 # Initialize ML services
 detector = DetectionService(model_path="yolov8n.pt", device="cpu")
 video_processor = VideoProcessingService(detector)
+
+# Initialize Video Clipper service
+from app.services.video_clipper_service import VideoClipperService
+from app.models.clipper_schemas import VideoClipperJobResponse, ClipperJobStatus, ClipInfo
+
+video_clipper = VideoClipperService(STORAGE_DIR)
+
+# Store for tracking clipper jobs (in production, use database)
+clipper_jobs = {}
+
 
 
 # ==================== Video Deletion ====================
@@ -876,6 +888,182 @@ def get_worker_timeline(video_id: str, worker_id: str, db: Session = Depends(get
     
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ==================== Video Clipper ====================
+
+@app.post("/api/video-clipper/upload", response_model=VideoClipperJobResponse)
+async def upload_video_clipper_files(
+    video: UploadFile = File(...),
+    excel: UploadFile = File(...)
+):
+    """Upload video and Excel file for clipping"""
+    try:
+        # Generate unique job ID
+        job_id = str(uuid.uuid4())
+        
+        # Create temp directory for this job
+        temp_dir = STORAGE_DIR / "temp" / job_id
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save video file with original filename
+        video_path = temp_dir / video.filename
+        video_content = await video.read()
+        with open(video_path, "wb") as f:
+            f.write(video_content)
+        
+        # Save Excel file
+        excel_path = temp_dir / excel.filename
+        excel_content = await excel.read()
+        with open(excel_path, "wb") as f:
+            f.write(excel_content)
+        
+        # Validate Excel file
+        try:
+            video_clipper.parse_excel_timestamps(str(excel_path))
+        except Exception as e:
+            # Clean up temp files
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise HTTPException(status_code=400, detail=f"Invalid Excel file: {str(e)}")
+        
+        # Initialize job status
+        from datetime import datetime
+        clipper_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "pending",
+            "progress": 0,
+            "total_clips": None,
+            "processed_clips": 0,
+            "clips": [],
+            "error_message": None,
+            "created_at": datetime.now(),
+            "completed_at": None,
+            "video_path": str(video_path),
+            "excel_path": str(excel_path),
+            "video_name": Path(video.filename).stem
+        }
+        
+        # Start background processing
+        threading.Thread(
+            target=process_clipper_job_background,
+            args=(job_id,),
+            daemon=True
+        ).start()
+        
+        return VideoClipperJobResponse(
+            job_id=job_id,
+            status="pending",
+            message="Video clipper job started. Use job_id to check progress."
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def process_clipper_job_background(job_id: str):
+    """Background task to process video clipping"""
+    import traceback
+    from datetime import datetime
+    
+    print(f"[CLIPPER] Started job {job_id}")
+    
+    try:
+        job = clipper_jobs[job_id]
+        job["status"] = "processing"
+        
+        def progress_callback(progress, processed, total):
+            job["progress"] = progress
+            job["processed_clips"] = processed
+            job["total_clips"] = total
+        
+        # Cut video
+        result = video_clipper.cut_video_clips(
+            video_path=job["video_path"],
+            excel_path=job["excel_path"],
+            job_id=job_id,
+            progress_callback=progress_callback
+        )
+        
+        # Update job with results
+        job["status"] = "complete"
+        job["progress"] = 100
+        job["total_clips"] = result["total_clips"]
+        job["processed_clips"] = result["total_clips"]
+        job["clips"] = result["clips"]
+        job["completed_at"] = datetime.now()
+        
+        print(f"[CLIPPER] COMPLETE {job_id} - {result['total_clips']} clips created")
+        
+        # Clean up temp files
+        import shutil
+        temp_dir = Path(job["video_path"]).parent
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        
+    except Exception as e:
+        print(f"[CLIPPER ERROR] {job_id}:", e)
+        traceback.print_exc()
+        
+        job = clipper_jobs.get(job_id)
+        if job:
+            job["status"] = "failed"
+            job["error_message"] = str(e)
+            job["completed_at"] = datetime.now()
+
+
+@app.get("/api/video-clipper/jobs/{job_id}", response_model=ClipperJobStatus)
+def get_clipper_job_status(job_id: str):
+    """Get status of a video clipper job"""
+    if job_id not in clipper_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    job = clipper_jobs[job_id]
+    
+    # Convert clips to ClipInfo objects
+    clips = None
+    if job["clips"]:
+        clips = [
+            ClipInfo(
+                filename=clip["filename"],
+                folder=clip["folder"],
+                action_name=clip["action_name"],
+                va_tag=clip["va_tag"],
+                clip_number=clip["clip_number"],
+                duration_sec=clip["duration_sec"],
+                download_url=f"/api/video-clipper/clips/{job_id}/{clip['relative_path']}"
+            )
+            for clip in job["clips"]
+        ]
+    
+    return ClipperJobStatus(
+        job_id=job["job_id"],
+        status=job["status"],
+        progress=job["progress"],
+        total_clips=job["total_clips"],
+        processed_clips=job["processed_clips"],
+        clips=clips,
+        error_message=job["error_message"],
+        created_at=job["created_at"],
+        completed_at=job["completed_at"]
+    )
+
+
+@app.get("/api/video-clipper/clips/{job_id}/{video_name}/{filename}")
+def download_clip(job_id: str, video_name: str, filename: str):
+    """Download a specific clip"""
+    # Clips are now stored directly in video_name folder (flat structure)
+    clip_path = DATASET_DIR / video_name / filename
+    
+    if not clip_path.exists():
+        raise HTTPException(status_code=404, detail="Clip not found")
+    
+    return FileResponse(
+        str(clip_path),
+        media_type="video/mp4",
+        filename=filename
+    )
 
 
 # ==================== Health Check ====================
