@@ -1,0 +1,102 @@
+{
+  "apply": {
+    "trained": true,
+    "n_clips": 10,
+    "n_classes": 5,
+    "best_path": "outputs_deployment\\stage2\\apply\\best.pt",
+    "last_path": "outputs_deployment\\stage2\\apply\\last.pt",
+    "label_map_path": "outputs_deployment\\stage2\\apply\\label_map.json"
+  },
+  "attach": {
+    "trained": true,
+    "n_clips": 4,
+    "n_classes": 2,
+    "best_path": "outputs_deployment\\stage2\\attach\\best.pt",
+    "last_path": "outputs_deployment\\stage2\\attach\\last.pt",
+    "label_map_path": "outputs_deployment\\stage2\\attach\\label_map.json"
+  },
+  "collect": {
+    "trained": true,
+    "n_clips": 10,
+    "n_classes": 5,
+    "best_path": "outputs_deployment\\stage2\\collect\\best.pt",
+    "last_path": "outputs_deployment\\stage2\\collect\\last.pt",
+    "label_map_path": "outputs_deployment\\stage2\\collect\\label_map.json"
+  },
+  "excess": {
+    "trained": false,
+    "reason": "single_class",
+    "n_clips": 2,
+    "n_classes": 1
+  },
+  "fill": {
+    "trained": true,
+    "n_clips": 4,
+    "n_classes": 2,
+    "best_path": "outputs_deployment\\stage2\\fill\\best.pt",
+    "last_path": "outputs_deployment\\stage2\\fill\\last.pt",
+    "label_map_path": "outputs_deployment\\stage2\\fill\\label_map.json"
+  },
+  "get": {
+    "trained": true,
+    "n_clips": 16,
+    "n_classes": 8,
+    "best_path": "outputs_deployment\\stage2\\get\\best.pt",
+    "last_path": "outputs_deployment\\stage2\\get\\last.pt",
+    "label_map_path": "outputs_deployment\\stage2\\get\\label_map.json"
+  },
+  "hand": {
+    "trained": true,
+    "n_clips": 16,
+    "n_classes": 8,
+    "best_path": "outputs_deployment\\stage2\\hand\\best.pt",
+    "last_path": "outputs_deployment\\stage2\\hand\\last.pt",
+    "label_map_path": "outputs_deployment\\stage2\\hand\\label_map.json"
+  },
+  "inspect": {
+    "trained": false,
+    "reason": "single_class",
+    "n_clips": 2,
+    "n_classes": 1
+  },
+  "lift": {
+    "trained": false,
+    "reason": "single_class",
+    "n_clips": 2,
+    "n_classes": 1
+  },
+  "mount": {
+    "trained": true,
+    "n_clips": 14,
+    "n_classes": 6,
+    "best_path": "outputs_deployment\\stage2\\mount\\best.pt",
+    "last_path": "outputs_deployment\\stage2\\mount\\last.pt",
+    "label_map_path": "outputs_deployment\\stage2\\mount\\label_map.json"
+  },
+  "read": {
+    "trained": false,
+    "reason": "single_class",
+    "n_clips": 4,
+    "n_classes": 1
+  },
+  "remove": {
+    "trained": false,
+    "reason": "single_class",
+    "n_clips": 2,
+    "n_classes": 1
+  },
+  "take": {
+    "trained": false,
+    "reason": "single_class",
+    "n_clips": 2,
+    "n_classes": 1
+  },
+  "tight": {
+    "trained": true,
+    "n_clips": 12,
+    "n_classes": 6,
+    "best_path": "outputs_deployment\\stage2\\tight\\best.pt",
+    "last_path": "outputs_deployment\\stage2\\tight\\last.pt",
+    "label_map_path": "outputs_deployment\\stage2\\tight\\label_map.json"
+  }
+}

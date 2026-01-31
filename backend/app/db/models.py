@@ -113,6 +113,32 @@ class VANVAMetric(Base):
     video = relationship("Video", back_populates="metrics")
 
 
+class Prediction(Base):
+    """Action prediction job and results"""
+    __tablename__ = "predictions"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    job_id = Column(String, unique=True, nullable=False)
+    filename = Column(String, nullable=False)
+    status = Column(String, default="pending")  # pending, processing, complete, failed
+    
+    # Paths
+    input_video_path = Column(String, nullable=False)
+    output_video_path = Column(String, nullable=True)
+    
+    # Results
+    coarse_action = Column(String, nullable=True)
+    fine_action = Column(String, nullable=True)
+    value_category = Column(String, nullable=True)
+    prediction_json = Column(Text, nullable=True)  # Full JSON result
+    
+    # Metadata
+    error_message = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+
+
+
 # ==================== PostgreSQL Models (Permanent Backup Storage) ====================
 
 class VideoBackup(PostgresBase):
@@ -148,3 +174,29 @@ class VANVAMetricBackup(PostgresBase):
     computed_at = Column(DateTime, default=datetime.utcnow)
     
     video = relationship("VideoBackup", back_populates="metrics")
+
+
+class PredictionBackup(PostgresBase):
+    """Action prediction results backup in PostgreSQL"""
+    __tablename__ = "predictions"
+    
+    id = Column(String, primary_key=True)
+    job_id = Column(String, unique=True, nullable=False)
+    filename = Column(String, nullable=False)
+    status = Column(String, default="pending")
+    
+    # Paths
+    input_video_path = Column(String, nullable=False)
+    output_video_path = Column(String, nullable=True)
+    
+    # Results
+    coarse_action = Column(String, nullable=True)
+    fine_action = Column(String, nullable=True)
+    value_category = Column(String, nullable=True)
+    prediction_json = Column(Text, nullable=True)
+    
+    # Metadata
+    error_message = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+

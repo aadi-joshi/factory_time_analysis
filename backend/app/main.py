@@ -63,6 +63,28 @@ video_clipper = VideoClipperService(STORAGE_DIR)
 # Store for tracking clipper jobs (in production, use database)
 clipper_jobs = {}
 
+# Initialize Action Prediction service
+from app.services.action_prediction_service import ActionPredictionService
+from app.models.prediction_schemas import (
+    PredictionUploadResponse,
+    PredictionStatus,
+    PredictionResult,
+    PredictionJobInfo
+)
+
+# Lazy-load prediction service (heavy ML models)
+prediction_service = None
+prediction_jobs = {}
+
+def get_prediction_service():
+    """Lazy-load prediction service to avoid startup delay"""
+    global prediction_service
+    if prediction_service is None:
+        print("🔧 Initializing Action Prediction Service...")
+        prediction_service = ActionPredictionService()
+    return prediction_service
+
+
 
 
 # ==================== Video Deletion ====================
@@ -1063,6 +1085,338 @@ def download_clip(job_id: str, video_name: str, filename: str):
         str(clip_path),
         media_type="video/mp4",
         filename=filename
+    )
+
+
+# ==================== Action Prediction ====================
+
+PREDICTIONS_DIR = STORAGE_DIR / "predictions"
+PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+@app.post("/api/predict-action/upload", response_model=PredictionUploadResponse)
+async def upload_prediction_video(
+    video: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """Upload video for action prediction"""
+    try:
+        # Validate file type
+        if not video.filename.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.webm')):
+            raise HTTPException(status_code=400, detail="Invalid video format. Supported: MP4, AVI, MOV, MKV, WEBM")
+        
+        # Generate unique job ID
+        job_id = str(uuid.uuid4())
+        
+        # Create directory for this prediction job
+        job_dir = PREDICTIONS_DIR / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save video file
+        input_path = job_dir / "input.mp4"
+        video_content = await video.read()
+        with open(input_path, "wb") as f:
+            f.write(video_content)
+        
+        # Create DB record
+        from app.db.models import Prediction
+        new_job = Prediction(
+            job_id=job_id,
+            filename=video.filename,
+            status="pending",
+            input_video_path=str(input_path)
+        )
+        db.add(new_job)
+        db.commit()
+        
+        # Initialize in-memory progress tracker (since DB only stores status)
+        prediction_jobs[job_id] = {
+            "progress": 0,
+            "error": None
+        }
+        
+        return PredictionUploadResponse(
+            job_id=job_id,
+            filename=video.filename,
+            message="Video uploaded successfully. Use /process endpoint to start prediction."
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/predict-action/{job_id}/process")
+def process_prediction(
+    job_id: str,
+    db: Session = Depends(get_db)
+):
+    """Start prediction processing for uploaded video"""
+    from app.db.models import Prediction
+    
+    # Check if job exists in DB
+    job = db.query(Prediction).filter(Prediction.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if job.status != "pending":
+        raise HTTPException(status_code=400, detail=f"Job already {job.status}")
+    
+    # Start background processing
+    import threading
+    threading.Thread(
+        target=process_prediction_background,
+        args=(job_id,),
+        daemon=True
+    ).start()
+    
+    # Update status immediately
+    job.status = "processing"
+    db.commit()
+    
+    # Init progress
+    if job_id not in prediction_jobs:
+        prediction_jobs[job_id] = {"progress": 0}
+    prediction_jobs[job_id]["progress"] = 10
+    
+    return {
+        "job_id": job_id,
+        "status": "processing",
+        "message": "Prediction started"
+    }
+
+
+def process_prediction_background(job_id: str):
+    """Background task to process action prediction"""
+    import traceback
+    from datetime import datetime
+    from app.db import SessionLocal, PostgresSessionLocal
+    from app.db.models import Prediction, PredictionBackup
+    
+    print(f"[PREDICTION] Started job {job_id}")
+    db = SessionLocal()
+    
+    try:
+        if job_id not in prediction_jobs:
+            prediction_jobs[job_id] = {}
+        
+        prediction_jobs[job_id]["progress"] = 20
+        
+        # Get job record
+        job = db.query(Prediction).filter(Prediction.job_id == job_id).first()
+        if not job:
+            return
+
+        # Get prediction service
+        service = get_prediction_service()
+        
+        # Run prediction
+        prediction_jobs[job_id]["progress"] = 40
+        prediction_result = service.predict_video(job.input_video_path)
+        
+        # Save prediction results
+        job_dir = Path(job.input_video_path).parent
+        prediction_path = job_dir / "prediction.json"
+        with open(prediction_path, "w") as f:
+            json.dump(prediction_result, f, indent=2)
+        
+        prediction_jobs[job_id]["progress"] = 60
+        
+        # Create annotated video
+        output_path = job_dir / "output.mp4"
+        success, actual_output_path = service.create_annotated_video(
+            job.input_video_path,
+            str(output_path),
+            prediction_result
+        )
+        
+        if not success:
+            raise RuntimeError("Failed to create annotated video")
+        
+        prediction_jobs[job_id]["progress"] = 100
+        
+        # Update DB record with results
+        job.status = "complete"
+        job.output_video_path = actual_output_path
+        job.coarse_action = prediction_result["coarse_action"]
+        job.fine_action = prediction_result["fine_action"]
+        job.value_category = prediction_result["value_category"]
+        job.prediction_json = json.dumps(prediction_result)
+        job.completed_at = datetime.now()
+        
+        db.commit()
+        
+        print(f"[PREDICTION] COMPLETE {job_id} - {prediction_result['fine_action']}")
+        
+        # Backup to PostgreSQL
+        try:
+            print(f"[PREDICTION] Backing up to PostgreSQL...")
+            pg_db = PostgresSessionLocal()
+            backup = PredictionBackup(
+                id=str(uuid.uuid4()),
+                job_id=job.job_id,
+                filename=job.filename,
+                status="complete",
+                input_video_path=job.input_video_path,
+                output_video_path=job.output_video_path,
+                coarse_action=job.coarse_action,
+                fine_action=job.fine_action,
+                value_category=job.value_category,
+                prediction_json=job.prediction_json,
+                created_at=job.created_at,
+                completed_at=job.completed_at
+            )
+            pg_db.add(backup)
+            pg_db.commit()
+            pg_db.close()
+            print(f"[PREDICTION] PostgreSQL backup successful")
+        except Exception as pg_e:
+            print(f"[PREDICTION WARNING] PostgreSQL backup failed: {pg_e}")
+            
+    except Exception as e:
+        print(f"[PREDICTION ERROR] {job_id}:", e)
+        traceback.print_exc()
+        
+        # Update DB error
+        try:
+            job = db.query(Prediction).filter(Prediction.job_id == job_id).first()
+            if job:
+                job.status = "failed"
+                job.error_message = str(e)
+                job.completed_at = datetime.now()
+                db.commit()
+            
+            if job_id in prediction_jobs:
+                prediction_jobs[job_id]["error"] = str(e)
+        except:
+            pass
+            
+    finally:
+        db.close()
+
+
+@app.get("/api/predict-action/{job_id}/status", response_model=PredictionStatus)
+def get_prediction_status(
+    job_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get status of a prediction job"""
+    from app.db.models import Prediction
+    
+    job = db.query(Prediction).filter(Prediction.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Get transient progress from memory if processing
+    progress = 0
+    if job.status == "processing" and job_id in prediction_jobs:
+        progress = prediction_jobs[job_id].get("progress", 0)
+    elif job.status == "complete":
+        progress = 100
+    
+    return PredictionStatus(
+        job_id=job.job_id,
+        status=job.status,
+        progress=progress,
+        message=job.error_message,
+        created_at=job.created_at,
+        completed_at=job.completed_at
+    )
+
+
+@app.get("/api/predict-action/{job_id}/result", response_model=PredictionJobInfo)
+def get_prediction_result(
+    job_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get prediction results"""
+    from app.db.models import Prediction
+    
+    job = db.query(Prediction).filter(Prediction.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    result = None
+    if job.prediction_json:
+        result_dict = json.loads(job.prediction_json)
+        result = PredictionResult(**result_dict)
+    
+    # Get transient progress from memory if processing
+    progress = 0
+    if job.status == "processing" and job_id in prediction_jobs:
+        progress = prediction_jobs[job_id].get("progress", 0)
+    elif job.status == "complete":
+        progress = 100
+        
+    return PredictionJobInfo(
+        job_id=job.job_id,
+        filename=job.filename,
+        status=job.status,
+        progress=progress,
+        result=result,
+        error=job.error_message,
+        created_at=job.created_at,
+        completed_at=job.completed_at,
+        input_video_path=job.input_video_path,
+        output_video_path=job.output_video_path
+    )
+
+
+@app.get("/api/predict-action/{job_id}/video")
+async def get_prediction_video(
+    job_id: str,
+    db: Session = Depends(get_db)
+):
+    """Stream annotated prediction video"""
+    from app.db.models import Prediction
+    
+    job = db.query(Prediction).filter(Prediction.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if job.status != "complete":
+        raise HTTPException(status_code=400, detail="Prediction not complete yet")
+    
+    output_video_path = job.output_video_path
+    if not output_video_path:
+        raise HTTPException(status_code=404, detail="Output video path not set")
+    
+    # Handle different video extensions from legacy jobs or format changes
+    output_path = Path(output_video_path)
+    
+    # If explicit path doesn't exist, check for .webm (new format) or .avi (old format)
+    if not output_path.exists():
+        webm_path = output_path.with_suffix('.webm')
+        avi_path = output_path.with_suffix('.avi')
+        
+        if webm_path.exists():
+            output_path = webm_path
+        elif avi_path.exists():
+            output_path = avi_path
+    
+    # Debug logging
+    print(f"[VIDEO] Requested video for job {job_id}")
+    print(f"[VIDEO] Path from job: {output_video_path}")
+    print(f"[VIDEO] Actual path: {output_path}")
+    print(f"[VIDEO] Path exists: {output_path.exists()}")
+    print(f"[VIDEO] File size: {output_path.stat().st_size if output_path.exists() else 'N/A'} bytes")
+    
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail=f"Annotated video not found at {output_path}")
+    
+    # Determine media type based on extension
+    if output_path.suffix == '.webm':
+        media_type = "video/webm"
+    elif output_path.suffix == '.avi':
+        media_type = "video/x-msvideo"
+    else:
+        media_type = "video/mp4"
+    
+    # FileResponse automatically handles range requests for video streaming
+    return FileResponse(
+        path=str(output_path),
+        media_type=media_type,
+        filename=f"predicted_{Path(job.filename).stem}{output_path.suffix}"
     )
 
 
