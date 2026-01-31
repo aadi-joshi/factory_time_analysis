@@ -1,0 +1,16 @@
+{
+  "apply": 0,
+  "attach": 1,
+  "collect": 2,
+  "excess": 3,
+  "fill": 4,
+  "get": 5,
+  "hand": 6,
+  "inspect": 7,
+  "lift": 8,
+  "mount": 9,
+  "read": 10,
+  "remove": 11,
+  "take": 12,
+  "tight": 13
+}

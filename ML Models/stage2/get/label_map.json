@@ -1,0 +1,10 @@
+{
+  "get_flexible_hose_pipe": 0,
+  "get_o_ring": 1,
+  "get_side_pannel": 2,
+  "get_the_nipple": 3,
+  "get_the_part": 4,
+  "get_the_service_panel_assembly": 5,
+  "get_the_vertical_beam": 6,
+  "get_thermostat_housing_assembly": 7
+}

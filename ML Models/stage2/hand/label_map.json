@@ -1,0 +1,10 @@
+{
+  "hand_tight_nipple_to_pipe": 0,
+  "hand_tight_panel_bolts": 1,
+  "hand_tight_safety_valve_to_vessel": 2,
+  "hand_tight_sensor_to_pipe": 3,
+  "hand_tight_sensor_with_spanner": 4,
+  "hand_tight_stud_to_vessel": 5,
+  "hand_tight_vertical_beam": 6,
+  "hand_tight_with_spanner": 7
+}

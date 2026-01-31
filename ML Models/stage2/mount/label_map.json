@@ -1,0 +1,8 @@
+{
+  "mount_house_pipe_to_vessel": 0,
+  "mount_o_ring_to_pipe": 1,
+  "mount_panel_on_base_frame": 2,
+  "mount_pipe_to_element": 3,
+  "mount_side_panel_assembly_to_base_frame": 4,
+  "mount_thermostat_housing_assembly": 5
+}

@@ -9,6 +9,7 @@ import WorkerAssignment from './pages/WorkerAssignment'
 import WorkerReview from './pages/WorkerReview'
 import Analytics from './pages/Analytics'
 import VideoClipper from './pages/VideoClipper'
+import PredictAction from './pages/PredictAction'
 import './App.css'
 
 function ErrorFallback({ error }) {
@@ -87,6 +88,10 @@ function App() {
                             <Route
                                 path="/clipper"
                                 element={<VideoClipper />}
+                            />
+                            <Route
+                                path="/predict-action"
+                                element={<PredictAction />}
                             />
                             <Route
                                 path="/zones/:videoId"

@@ -1,0 +1,7 @@
+{
+  "collect_bolt_and_washer": 0,
+  "collect_hadware": 1,
+  "collect_hardware": 2,
+  "collect_panel_bolts": 3,
+  "collect_washers": 4
+}
