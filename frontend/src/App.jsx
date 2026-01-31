@@ -8,6 +8,7 @@ import ZoneEditor from './pages/ZoneEditor'
 import WorkerAssignment from './pages/WorkerAssignment'
 import WorkerReview from './pages/WorkerReview'
 import Analytics from './pages/Analytics'
+import VideoClipper from './pages/VideoClipper'
 import './App.css'
 
 function ErrorFallback({ error }) {
@@ -82,6 +83,10 @@ function App() {
                             <Route
                                 path="/upload"
                                 element={<VideoUpload onVideoUploaded={handleVideoUploaded} />}
+                            />
+                            <Route
+                                path="/clipper"
+                                element={<VideoClipper />}
                             />
                             <Route
                                 path="/zones/:videoId"
